@@ -1,0 +1,587 @@
+{
+  "name": "Frigate Alerts Template",
+  "nodes": [
+    {
+      "parameters": {
+        "topics": "frigate/tracked_object_update",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mqttTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1344,
+        144
+      ],
+      "id": "cc74a6c4-2950-4105-b8fe-defd2a0a97e2",
+      "name": "MQTT Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $json.message ?? $json.payload ?? $json.data ?? $json;\n\nfor (let i = 0; i < 3; i++) {\n  if (typeof raw === 'string') {\n    try {\n      raw = JSON.parse(raw);\n    } catch {\n      break;\n    }\n    continue;\n  }\n\n  if (raw && typeof raw === 'object') {\n    if (typeof raw.message === 'string' || (raw.message && typeof raw.message === 'object')) {\n      raw = raw.message;\n      continue;\n    }\n    break;\n  }\n\n  break;\n}\n\nlet data = raw;\nif (!data || typeof data !== 'object') {\n  data = {};\n}\n\nconst normalized = {\n  ...data,\n  id: data.id ?? data.after?.id,\n  type: data.type ?? data.after?.type ?? data.label ?? data.after?.label,\n  name: data.name ?? data.after?.sub_label ?? data.sub_label ?? data.after?.label ?? data.label ?? '',\n  score: data.score ?? data.after?.score ?? data.top_score ?? data.after?.top_score,\n  camera: data.camera ?? data.after?.camera,\n  timestamp: data.timestamp ?? data.after?.frame_time ?? data.after?.start_time,\n};\n\nconst typeNorm = String(normalized.type ?? '').trim().toLowerCase();\nconst nameNorm = String(normalized.name ?? '').trim().toLowerCase();\n\nconst isPerson = ['person', 'persona', 'face', 'rostro'].includes(typeNorm);\nconst isMotorcycle = ['motorcycle', 'motorbike', 'moto', 'motocicleta'].includes(typeNorm);\nconst isVehicle = isMotorcycle || ['car', 'vehicle', 'vehiculo', 'vehiculo', 'truck', 'bus', 'van'].includes(typeNorm);\n\nconst suspiciousKeywords = ['sospechoso', 'suspicious', 'sin placa', 'sin_placa', 'sin-placa', 'robado', 'robo'];\nconst hasSuspiciousKeyword = suspiciousKeywords.some((keyword) => nameNorm.includes(keyword));\nconst hasUnknownId = !nameNorm || ['unknown', 'desconocido', 'desconocida', 'n/a', 'na'].includes(nameNorm);\nconst isSuspiciousVehicle = isVehicle && (hasSuspiciousKeyword || hasUnknownId);\n\nconst ts = normalized.timestamp ? new Date(normalized.timestamp * 1000) : new Date();\nconst horaLegible = ts.toLocaleString('es-HN', {\n  timeZone: 'America/Tegucigalpa',\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit',\n  hour: '2-digit',\n  minute: '2-digit',\n  second: '2-digit',\n  hour12: true,\n});\n\nreturn [{\n  json: {\n    ...normalized,\n    topic: $json.topic,\n    hora_legible: horaLegible,\n    is_person: isPerson,\n    is_motorcycle: isMotorcycle,\n    is_vehicle: isVehicle,\n    is_suspicious_vehicle: isSuspiciousVehicle,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1104,
+        144
+      ],
+      "id": "5f76d9d7-a7c0-4a73-82e4-5058d0c4de5a",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "204fcb8a-0a11-4bd6-a576-bb370aa3b6d9",
+              "leftValue": "={{$json.name}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "if-known-is-person",
+              "leftValue": "={{$json.is_person}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "if-known-not-unknown-en",
+              "leftValue": "={{($json.name || '').trim().toLowerCase()}}",
+              "rightValue": "unknown",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "if-known-not-unknown-es",
+              "leftValue": "={{($json.name || '').trim().toLowerCase()}}",
+              "rightValue": "desconocido",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -912,
+        144
+      ],
+      "id": "166a301a-c2bb-43d1-8c98-0a97a3518809",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "known-text",
+              "name": "texto",
+              "value": "={{ '[KNOWN] ' + ($json.name || 'Persona reconocida') + ' detectado en la camara ' + ($json.camera || 'desconocida') + '\nConfianza: ' + ($json.score ?? 'N/A') + '\nHora: ' + ($json.hora_legible || 'N/A') + '\nFoto: https://YOUR_FRIGATE_DOMAIN/api/events/' + ($json.id || '') + '/snapshot.jpg' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -704,
+        64
+      ],
+      "id": "c96844f2-1e8a-4a4b-b840-fc102975d126",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "unknown-text",
+              "name": "texto",
+              "value": "={{ (() => { const cam = $json.camera || 'desconocida'; const conf = $json.score ?? 'N/A'; const hora = $json.hora_legible || 'N/A'; const foto = 'https://YOUR_FRIGATE_DOMAIN/api/events/' + ($json.id || '') + '/snapshot.jpg'; if ($json.is_motorcycle) { if ($json.is_suspicious_vehicle) { return '[MOTO-SOSPECHOSA] Motocicleta sospechosa detectada en la camara ' + cam + '\nConfianza: ' + conf + '\nHora: ' + hora + '\nFoto: ' + foto; } return '[MOTO] Motocicleta detectada en la camara ' + cam + '\nConfianza: ' + conf + '\nHora: ' + hora + '\nFoto: ' + foto; } if ($json.is_vehicle) { if ($json.is_suspicious_vehicle) { return '[VEHICULO-SOSPECHOSO] Vehiculo sospechoso detectado en la camara ' + cam + '\nConfianza: ' + conf + '\nHora: ' + hora + '\nFoto: ' + foto; } return '[VEHICULO] Vehiculo detectado en la camara ' + cam + '\nConfianza: ' + conf + '\nHora: ' + hora + '\nFoto: ' + foto; } return '[DESCONOCIDO] Rostro no reconocido detectado en la camara ' + cam + '\nConfianza: ' + conf + '\nHora: ' + hora + '\nFoto: ' + foto; })() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -704,
+        256
+      ],
+      "id": "6d21a717-358b-44d2-88ab-fab3c269333c",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO public.frigate_events\n(event_id, type, name, score, camera, event_timestamp, topic, texto)\nVALUES\n(\n  {{$json.id ? \"'\" + $json.id.replace(/'/g, \"''\") + \"'\" : \"NULL\"}},\n  {{$json.type ? \"'\" + $json.type.replace(/'/g, \"''\") + \"'\" : \"NULL\"}},\n  {{$json.name ? \"'\" + $json.name.replace(/'/g, \"''\") + \"'\" : \"NULL\"}},\n  {{$json.score ?? \"NULL\"}},\n  {{$json.camera ? \"'\" + $json.camera.replace(/'/g, \"''\") + \"'\" : \"NULL\"}},\n  {{$json.timestamp ?? \"NULL\"}},\n  {{$json.topic ? \"'\" + $json.topic.replace(/'/g, \"''\") + \"'\" : \"NULL\"}},\n  {{$json.texto ? \"'\" + $json.texto.replace(/'/g, \"''\") + \"'\" : \"NULL\"}}\n)\nON CONFLICT (event_id) DO NOTHING;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        176
+      ],
+      "id": "28863cbb-e34a-4784-ae9a-9914258574f8",
+      "name": "Insert Event"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_WAHA_DOMAIN/api/sendText",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\n  \"X-Api-Key\": \"YOUR_WAHA_API_KEY\",\n  \"Content-Type\": \"application/json\"\n}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session",
+              "value": "default"
+            },
+            {
+              "name": "chatId",
+              "value": "YOUR_GROUP_ID@g.us"
+            },
+            {
+              "name": "text",
+              "value": "={{$json.texto}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "continueOnFail": true,
+      "position": [
+        0,
+        0
+      ],
+      "id": "9a8bf705-784d-4a4e-82ea-980739fcf2b7",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_WAHA_DOMAIN/api/sendText",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\n  \"X-Api-Key\": \"YOUR_WAHA_API_KEY\",\n  \"Content-Type\": \"application/json\"\n}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session",
+              "value": "default"
+            },
+            {
+              "name": "chatId",
+              "value": "YOUR_GROUP_ID@g.us"
+            },
+            {
+              "name": "text",
+              "value": "={{$json.texto}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "continueOnFail": true,
+      "position": [
+        0,
+        368
+      ],
+      "id": "5cb46f6b-8498-42b7-bbd8-e5a1c409d068",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    COUNT(*) AS total,\n    {{$json.id ? \"'\" + $json.id.replace(/'/g, \"''\") + \"'\" : \"NULL\"}} AS id,\n    {{$json.type ? \"'\" + $json.type.replace(/'/g, \"''\") + \"'\" : \"NULL\"}} AS type,\n    {{$json.name ? \"'\" + $json.name.replace(/'/g, \"''\") + \"'\" : \"NULL\"}} AS name,\n    {{$json.score ?? \"NULL\"}} AS score,\n    {{$json.camera ? \"'\" + $json.camera.replace(/'/g, \"''\") + \"'\" : \"NULL\"}} AS camera,\n    {{$json.timestamp ?? \"NULL\"}} AS timestamp,\n    {{$json.topic ? \"'\" + $json.topic.replace(/'/g, \"''\") + \"'\" : \"NULL\"}} AS topic,\n    {{$json.hora_legible ? \"'\" + $json.hora_legible.replace(/'/g, \"''\") + \"'\" : \"NULL\"}} AS hora_legible,\n    {{$json.texto ? \"'\" + $json.texto.replace(/'/g, \"''\") + \"'\" : \"NULL\"}} AS texto\nFROM public.frigate_events\nWHERE\n    name IS NOT DISTINCT FROM {{$json.name ? \"'\" + $json.name.replace(/'/g, \"''\") + \"'\" : \"NULL\"}}\n    AND camera = {{$json.camera ? \"'\" + $json.camera.replace(/'/g, \"''\") + \"'\" : \"NULL\"}}\n    AND created_at >= NOW() - INTERVAL '5 minutes';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -480,
+        64
+      ],
+      "id": "80c94191-7ae8-4495-8c5b-2b3744c7cda7",
+      "name": "Check Recent Alert"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "known-no-spam",
+              "leftValue": "={{Number($json.total ?? 0)}}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -256,
+        64
+      ],
+      "id": "87ec172c-22ba-4071-bf4b-8edf4f3e30bc",
+      "name": "No Spam"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "unknown-no-spam",
+              "leftValue": "={{Number($json.total ?? 0)}}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -256,
+        256
+      ],
+      "id": "0abceaf4-127c-425f-88fc-16cd116dfd26",
+      "name": "No Spam1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    COUNT(*) AS total,\n    {{$json.id ? \"'\" + $json.id.replace(/'/g, \"''\") + \"'\" : \"NULL\"}} AS id,\n    {{$json.type ? \"'\" + $json.type.replace(/'/g, \"''\") + \"'\" : \"NULL\"}} AS type,\n    {{$json.name ? \"'\" + $json.name.replace(/'/g, \"''\") + \"'\" : \"NULL\"}} AS name,\n    {{$json.score ?? \"NULL\"}} AS score,\n    {{$json.camera ? \"'\" + $json.camera.replace(/'/g, \"''\") + \"'\" : \"NULL\"}} AS camera,\n    {{$json.timestamp ?? \"NULL\"}} AS timestamp,\n    {{$json.topic ? \"'\" + $json.topic.replace(/'/g, \"''\") + \"'\" : \"NULL\"}} AS topic,\n    {{$json.hora_legible ? \"'\" + $json.hora_legible.replace(/'/g, \"''\") + \"'\" : \"NULL\"}} AS hora_legible,\n    {{$json.texto ? \"'\" + $json.texto.replace(/'/g, \"''\") + \"'\" : \"NULL\"}} AS texto\nFROM public.frigate_events\nWHERE\n    event_id = {{$json.id ? \"'\" + $json.id.replace(/'/g, \"''\") + \"'\" : \"NULL\"}}\n    AND created_at >= NOW() - INTERVAL '5 minutes';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -480,
+        256
+      ],
+      "id": "cc13288e-8fe4-4158-92d6-baa9bd1afeb2",
+      "name": "Check Recent Alert1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE public.frigate_events\nSET\n  whatsapp_chat_id = {{(() => { const chatId = $json.to || ($json.id && $json.id.remote) || 'YOUR_GROUP_ID@g.us'; return \"'\" + String(chatId).replace(/'/g, \"''\") + \"'\"; })()}},\n  whatsapp_message_id = {{(() => { const messageId = ($json.id && ($json.id._serialized || $json.id.id)) || ''; return messageId ? \"'\" + String(messageId).replace(/'/g, \"''\") + \"'\" : 'NULL'; })()}},\n  whatsapp_ack = {{$json.ack ?? 'NULL'}},\n  whatsapp_status = {{(() => { if ($json.error) return \"'failed'\"; const ack = Number($json.ack); if (ack === 3) return \"'read'\"; if (ack === 2) return \"'delivered'\"; if (ack === 1) return \"'sent'\"; if (ack === 0) return \"'queued'\"; return \"'unknown'\"; })()}},\n  whatsapp_sent_at = CASE WHEN {{$json.error ? 'FALSE' : 'TRUE'}} THEN COALESCE(whatsapp_sent_at, NOW()) ELSE whatsapp_sent_at END,\n  notified_at = CASE WHEN {{$json.error ? 'FALSE' : 'TRUE'}} THEN COALESCE(notified_at, NOW()) ELSE notified_at END,\n  whatsapp_error = {{(() => { const err = ($json.error && ($json.error.message || $json.error.description || JSON.stringify($json.error))) || ''; return err ? \"'\" + String(err).replace(/'/g, \"''\") + \"'\" : 'NULL'; })()}}\nWHERE event_id = {{$node[\"Edit Fields\"].json[\"id\"] ? \"'\" + $node[\"Edit Fields\"].json[\"id\"].replace(/'/g, \"''\") + \"'\" : 'NULL'}};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        240,
+        -16
+      ],
+      "id": "b35baf63-fb37-4b98-a1c5-5b41c532f1f3",
+      "name": "Update WhatsApp Known"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE public.frigate_events\nSET\n  whatsapp_chat_id = {{(() => { const chatId = $json.to || ($json.id && $json.id.remote) || 'YOUR_GROUP_ID@g.us'; return \"'\" + String(chatId).replace(/'/g, \"''\") + \"'\"; })()}},\n  whatsapp_message_id = {{(() => { const messageId = ($json.id && ($json.id._serialized || $json.id.id)) || ''; return messageId ? \"'\" + String(messageId).replace(/'/g, \"''\") + \"'\" : 'NULL'; })()}},\n  whatsapp_ack = {{$json.ack ?? 'NULL'}},\n  whatsapp_status = {{(() => { if ($json.error) return \"'failed'\"; const ack = Number($json.ack); if (ack === 3) return \"'read'\"; if (ack === 2) return \"'delivered'\"; if (ack === 1) return \"'sent'\"; if (ack === 0) return \"'queued'\"; return \"'unknown'\"; })()}},\n  whatsapp_sent_at = CASE WHEN {{$json.error ? 'FALSE' : 'TRUE'}} THEN COALESCE(whatsapp_sent_at, NOW()) ELSE whatsapp_sent_at END,\n  notified_at = CASE WHEN {{$json.error ? 'FALSE' : 'TRUE'}} THEN COALESCE(notified_at, NOW()) ELSE notified_at END,\n  whatsapp_error = {{(() => { const err = ($json.error && ($json.error.message || $json.error.description || JSON.stringify($json.error))) || ''; return err ? \"'\" + String(err).replace(/'/g, \"''\") + \"'\" : 'NULL'; })()}}\nWHERE event_id = {{$node[\"Edit Fields1\"].json[\"id\"] ? \"'\" + $node[\"Edit Fields1\"].json[\"id\"].replace(/'/g, \"''\") + \"'\" : 'NULL'}};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        240,
+        400
+      ],
+      "id": "9256c0f8-b084-4cdf-9da3-26da573d28d7",
+      "name": "Update WhatsApp Unknown"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "audit-status",
+              "name": "audit_estado_envio",
+              "value": "={{($json.ack !== undefined && $json.ack !== null) ? 'enviado_a_waha' : ((Number($json.total ?? 0) > 0) ? 'no_enviado_anti_spam' : 'no_enviado')}}",
+              "type": "string"
+            },
+            {
+              "id": "audit-ack",
+              "name": "audit_ack",
+              "value": "={{($json.ack !== undefined && $json.ack !== null) ? String($json.ack) : 'N/A'}}",
+              "type": "string"
+            },
+            {
+              "id": "audit-delivery",
+              "name": "audit_confirmacion_entrega",
+              "value": "={{($json.ack !== undefined && $json.ack !== null) ? (Number($json.ack) >= 2 ? 'entregado' : (Number($json.ack) >= 1 ? 'en_servidor' : 'pendiente')) : ((Number($json.total ?? 0) > 0) ? 'no_aplica_bloqueado_antispam' : 'no_aplica')}}",
+              "type": "string"
+            },
+            {
+              "id": "audit-read",
+              "name": "audit_confirmacion_lectura",
+              "value": "={{($json.ack !== undefined && $json.ack !== null) ? (Number($json.ack) >= 3 ? 'leido' : 'pendiente') : ((Number($json.total ?? 0) > 0) ? 'no_aplica_bloqueado_antispam' : 'no_aplica')}}",
+              "type": "string"
+            },
+            {
+              "id": "audit-dest",
+              "name": "audit_destino",
+              "value": "={{$json.id?.remote || 'YOUR_GROUP_ID@g.us'}}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        224
+      ],
+      "id": "44cf7ba8-7f6f-4066-a2e3-1ab3f63b1367",
+      "name": "Estado Envio"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "MQTT Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Check Recent Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Check Recent Alert1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Recent Alert": {
+      "main": [
+        [
+          {
+            "node": "No Spam",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Spam": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Insert Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert Event",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Estado Envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Recent Alert1": {
+      "main": [
+        [
+          {
+            "node": "No Spam1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Spam1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Insert Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert Event",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Estado Envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Estado Envio",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Update WhatsApp Known",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Estado Envio",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Update WhatsApp Unknown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "template-version-1",
+  "meta": {},
+  "id": "frigate-alerts-template",
+  "tags": []
+}
